@@ -1,0 +1,19 @@
+# Vercel
+.vercel
+.env.vercel
+
+# Environment variables (keep template, ignore actual values)
+.env
+.env*.local
+.env.production
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db

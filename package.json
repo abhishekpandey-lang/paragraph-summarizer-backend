@@ -1,0 +1,17 @@
+{
+  "name": "paragraph-summarizer-backend",
+  "version": "1.0.0",
+  "description": "Backend API for paragraph summarization using xAI Grok",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "openai": "^4.20.1"
+  }
+}
