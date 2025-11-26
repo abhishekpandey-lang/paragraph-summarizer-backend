@@ -97,23 +97,43 @@ Please format the answer as:
       });
     }
 
-    const response = await openai.chat.completions.create({
-      model: MODEL_NAME,
-      messages: [
-        {
-          role: "system",
-          content: "You are an expert summarizer who converts complex information into simple short, understandable points."
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      max_tokens: 2500,
-      temperature: 0.7
+    // Direct fetch instead of OpenAI SDK for better Vercel compatibility
+    const fetchResponse = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'HTTP-Referer': 'https://paragraph-summarizer-backend.vercel.app',
+        'X-Title': 'Paragraph Summarizer Chrome Extension'
+      },
+      body: JSON.stringify({
+        model: MODEL_NAME,
+        messages: [
+          {
+            role: "system",
+            content: "You are an expert summarizer who converts complex information into simple short, understandable points."
+          },
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        max_tokens: 2500,
+        temperature: 0.7
+      })
     });
 
-    const summary = response.choices[0].message.content;
+    if (!fetchResponse.ok) {
+      const errorText = await fetchResponse.text();
+      console.error('OpenRouter API error:', fetchResponse.status, errorText);
+      return res.status(500).json({
+        error: 'API request failed',
+        details: `${fetchResponse.status}: ${errorText}`
+      });
+    }
+
+    const responseData = await fetchResponse.json();
+    const summary = responseData.choices[0].message.content;
     
     console.log('Summary generated successfully');
     
@@ -175,77 +195,102 @@ app.post('/api/translate', async (req, res) => {
     const translatePrompt = `Translate the following text into ${targetLang}. Preserve the original formatting (bullet points, lists, and newlines) as much as possible.\n\n${textToTranslate}`;
 
     console.log('[TRANSLATE] Calling model:', MODEL_NAME, 'Prompt length:', translatePrompt.length);
-    let response;
+    
+    // Direct fetch instead of OpenAI SDK for better Vercel compatibility
+    let fetchResponse;
     try {
-      response = await Promise.race([
-        openai.chat.completions.create({
-          model: MODEL_NAME,
-          messages: [
-            { role: 'system', content: 'You are a helpful translator. Translate accurately while preserving formatting.' },
-            { role: 'user', content: translatePrompt }
-          ],
-          max_tokens: 4000,
-          temperature: 0.3
+      fetchResponse = await Promise.race([
+        fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'HTTP-Referer': 'https://paragraph-summarizer-backend.vercel.app',
+            'X-Title': 'Paragraph Summarizer Chrome Extension'
+          },
+          body: JSON.stringify({
+            model: MODEL_NAME,
+            messages: [
+              { role: 'system', content: 'You are a helpful translator. Translate accurately while preserving formatting.' },
+              { role: 'user', content: translatePrompt }
+            ],
+            max_tokens: 4000,
+            temperature: 0.3
+          })
         }),
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Translation timeout after 60 seconds')), 60000)
         )
       ]);
-      console.log('[TRANSLATE] Response received. Choices:', response.choices ? response.choices.length : 0);
-    } catch (apiErr) {
-      console.error('[TRANSLATE] API call error:', apiErr && apiErr.message ? apiErr.message : String(apiErr));
-      if (apiErr && apiErr.status === 429) {
-        return res.status(429).json({ 
-          error: 'Rate limited by translation service', 
-          details: 'Please try again in a moment'
+      
+      if (!fetchResponse.ok) {
+        const errorText = await fetchResponse.text();
+        console.error('[TRANSLATE] OpenRouter API error:', fetchResponse.status, errorText);
+        
+        if (fetchResponse.status === 429) {
+          return res.status(429).json({ 
+            error: 'Rate limited by translation service', 
+            details: 'Please try again in a moment'
+          });
+        }
+        
+        return res.status(500).json({ 
+          error: 'Model API error', 
+          details: `${fetchResponse.status}: ${errorText}`,
+          model: MODEL_NAME
         });
       }
+      
+      const response = await fetchResponse.json();
+      console.log('[TRANSLATE] Response received. Choices:', response.choices ? response.choices.length : 0);
+      
+      if (!response || !response.choices || response.choices.length === 0) {
+        console.error('[TRANSLATE] No choices in response:', response);
+        return res.status(500).json({ error: 'Translation failed: no choices in response' });
+      }
+
+      let translated = response.choices[0] && response.choices[0].message && response.choices[0].message.content
+        ? response.choices[0].message.content
+        : null;
+
+      // Fallback: if content is empty but reasoning exists (from Deepseek-style models), extract from reasoning
+      if (!translated && response.choices[0] && response.choices[0].message && response.choices[0].message.reasoning) {
+        console.warn('[TRANSLATE] Content empty but reasoning exists. Extracting translation from reasoning...');
+        const reasoning = response.choices[0].message.reasoning;
+        // Try to extract English translations from reasoning (last few complete translations)
+        const matches = reasoning.match(/English: "([^"]+)"/g);
+        if (matches && matches.length > 0) {
+          // Extract last few translations and reconstruct
+          translated = matches
+            .map(m => m.replace(/English: "/, '').replace(/"$/, ''))
+            .map(t => '• ' + t)
+            .join('\n');
+          console.log('[TRANSLATE] Extracted from reasoning. Length:', translated.length);
+        }
+      }
+
+      if (!translated) {
+        console.error('[TRANSLATE] Model returned empty content. Choices[0]:', response.choices[0]);
+        
+        // Fallback: return original text with truncation marker
+        console.warn('[TRANSLATE] Falling back to original text due to model issues');
+        return res.json({ 
+          success: true, 
+          translatedText: textToTranslate,
+          warning: 'Translation service had issues. Showing original text.'
+        });
+      }
+
+      console.log('[TRANSLATE] Translation successful. Length:', translated.length);
+      res.json({ success: true, translatedText: translated });
+    } catch (apiErr) {
+      console.error('[TRANSLATE] API call error:', apiErr && apiErr.message ? apiErr.message : String(apiErr));
       return res.status(500).json({ 
-        error: 'Model API error', 
+        error: 'Translation API error', 
         details: apiErr && apiErr.message ? apiErr.message : String(apiErr),
         model: MODEL_NAME
       });
     }
-
-    if (!response || !response.choices || response.choices.length === 0) {
-      console.error('[TRANSLATE] No choices in response:', response);
-      return res.status(500).json({ error: 'Translation failed: no choices in response' });
-    }
-
-    let translated = response.choices[0] && response.choices[0].message && response.choices[0].message.content
-      ? response.choices[0].message.content
-      : null;
-
-    // Fallback: if content is empty but reasoning exists (from Deepseek-style models), extract from reasoning
-    if (!translated && response.choices[0] && response.choices[0].message && response.choices[0].message.reasoning) {
-      console.warn('[TRANSLATE] Content empty but reasoning exists. Extracting translation from reasoning...');
-      const reasoning = response.choices[0].message.reasoning;
-      // Try to extract English translations from reasoning (last few complete translations)
-      const matches = reasoning.match(/English: "([^"]+)"/g);
-      if (matches && matches.length > 0) {
-        // Extract last few translations and reconstruct
-        translated = matches
-          .map(m => m.replace(/English: "/, '').replace(/"$/, ''))
-          .map(t => '• ' + t)
-          .join('\n');
-        console.log('[TRANSLATE] Extracted from reasoning. Length:', translated.length);
-      }
-    }
-
-    if (!translated) {
-      console.error('[TRANSLATE] Model returned empty content. Choices[0]:', response.choices[0]);
-      
-      // Fallback: return original text with truncation marker
-      console.warn('[TRANSLATE] Falling back to original text due to model issues');
-      return res.json({ 
-        success: true, 
-        translatedText: textToTranslate,
-        warning: 'Translation service had issues. Showing original text.'
-      });
-    }
-
-    console.log('[TRANSLATE] Translation successful. Length:', translated.length);
-    res.json({ success: true, translatedText: translated });
   } catch (error) {
     console.error('[TRANSLATE] Unexpected error:', error && error.message ? error.message : error);
     res.status(500).json({ error: 'Error translating text', details: error && error.message ? error.message : String(error) });
