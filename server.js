@@ -45,8 +45,12 @@ if (!OPENAI_API_KEY) {
   openai = new OpenAI({
     apiKey: OPENAI_API_KEY,
     baseURL: baseURL,
-    timeout: 30000, // 30 second timeout
-    maxRetries: 1
+    timeout: 60000, // 60 second timeout for Vercel
+    maxRetries: 2,
+    defaultHeaders: {
+      'HTTP-Referer': 'https://github.com/abhishekpandey-lang/paragraph-summarizer-backend',
+      'X-Title': 'Paragraph Summarizer Extension'
+    }
   });
   console.log('✅ OpenAI client initialized with baseURL:', baseURL);
 }
