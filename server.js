@@ -29,8 +29,8 @@ app.use(express.json({ limit: '50mb' }));
 let openai = null;
 // Prefer an OpenAI API key, but keep backward compatibility with XAI_API_KEY
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.XAI_API_KEY;
-const MODEL_NAME = process.env.MODEL_NAME || 'gpt-oss-20b';
-const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1';
+const MODEL_NAME = (process.env.MODEL_NAME || 'gpt-oss-20b').trim(); // Trim whitespace/newlines
+const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1').trim();
 
 console.log('=== ENVIRONMENT VARIABLES ===');
 console.log('OPENAI_API_KEY:', OPENAI_API_KEY ? `${OPENAI_API_KEY.substring(0, 20)}...` : 'NOT SET');
